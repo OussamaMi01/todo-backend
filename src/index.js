@@ -1,4 +1,4 @@
-// backend/index.js
+// backend/src/index.js
 import { ApolloServer } from '@apollo/server';
 import { expressMiddleware } from '@apollo/server/express4';
 import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
@@ -6,14 +6,16 @@ import express from 'express';
 import http from 'http';
 import cors from 'cors';
 import bodyParser from 'body-parser';
-import { typeDefs } from './schema.js';
-import { resolvers } from './resolvers.js';
+import { typeDefs } from './schema.js';  // Now relative to src folder
+import { resolvers } from './resolvers.js';  // Now relative to src folder
 import dotenv from 'dotenv';
+import { PrismaClient } from '@prisma/client';
 
 dotenv.config();
 
 const app = express();
 const httpServer = http.createServer(app);
+const prisma = new PrismaClient();
 
 const server = new ApolloServer({
   typeDefs,
@@ -31,13 +33,9 @@ await server.start();
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
-  'https://checki-todo.vercel.app', // No trailing slash
-  'https://checki-todo-git-main.vercel.app', // Preview deployments
-  'https://checki-todo.vercel.app', // Production
-  // Allow any .vercel.app domain for preview deployments
+  'https://checki-todo.vercel.app',
+  'https://checki-todo-git-main.vercel.app',
   /^https:\/\/.*\.vercel\.app$/,
-  // Allow Railway domain if needed
-  'https://todo-backend-prod.up.railway.app',
 ];
 
 app.get('/', (_, res) => {
@@ -56,12 +54,8 @@ app.use(
   '/graphql',
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or curl)
-      if (!origin) {
-        return callback(null, true);
-      }
+      if (!origin) return callback(null, true);
       
-      // Check if origin matches any allowed pattern
       const isAllowed = allowedOrigins.some(allowed => {
         if (allowed instanceof RegExp) {
           return allowed.test(origin);
@@ -81,12 +75,19 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization'],
   }),
   bodyParser.json(),
-  expressMiddleware(server)
+  expressMiddleware(server, {
+    context: async ({ req }) => ({ prisma, token: req.headers.authorization }),
+  })
 );
 
 // Health check endpoint
-app.get('/health', (_, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get('/health', async (_, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', timestamp: new Date().toISOString(), database: 'connected' });
+  } catch (error) {
+    res.status(500).json({ status: 'error', error: 'Database connection failed' });
+  }
 });
 
 const PORT = process.env.PORT || 4000;
