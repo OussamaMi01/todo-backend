@@ -6,8 +6,8 @@ import express from 'express';
 import http from 'http';
 import cors from 'cors';
 import bodyParser from 'body-parser';
-import { typeDefs } from './schema.js';  // Now relative to src folder
-import { resolvers } from './resolvers.js';  // Now relative to src folder
+import { typeDefs } from './schema.js';
+import { resolvers } from './resolvers.js';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 
@@ -29,7 +29,7 @@ const server = new ApolloServer({
 
 await server.start();
 
-// Updated CORS configuration
+// CORS Configuration
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
@@ -39,13 +39,20 @@ const allowedOrigins = [
 ];
 
 app.get('/', (_, res) => {
+  const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN 
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : process.env.NODE_ENV === 'production'
+    ? 'https://todo-backend-prod.up.railway.app'
+    : `http://localhost:${PORT}`;
+    
   res.json({
     name: 'Todo List API',
     version: '1.0.0',
     status: 'running',
+    environment: process.env.NODE_ENV,
     endpoints: {
-      graphql: '/graphql',
-      health: '/health'
+      graphql: `${baseUrl}/graphql`,
+      health: `${baseUrl}/health`
     }
   });
 });
@@ -84,13 +91,45 @@ app.use(
 app.get('/health', async (_, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: 'ok', timestamp: new Date().toISOString(), database: 'connected' });
+    const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN 
+      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+      : process.env.NODE_ENV === 'production'
+      ? 'https://todo-backend-prod.up.railway.app'
+      : `http://localhost:${PORT}`;
+      
+    res.json({ 
+      status: 'ok', 
+      timestamp: new Date().toISOString(), 
+      database: 'connected',
+      environment: process.env.NODE_ENV,
+      url: `${baseUrl}/graphql`
+    });
   } catch (error) {
-    res.status(500).json({ status: 'error', error: 'Database connection failed' });
+    console.error('Health check failed:', error);
+    res.status(500).json({ 
+      status: 'error', 
+      error: 'Database connection failed',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 
 const PORT = process.env.PORT || 4000;
 
 await new Promise((resolve) => httpServer.listen({ port: PORT }, resolve));
-console.log(`🚀 Server ready at ${process.env.NODE_ENV === 'production' ? 'https://todo-backend-prod.up.railway.app' : `http://localhost:${PORT}`}/graphql`);
+
+// Determine the correct URL to display
+const getServerUrl = () => {
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+    return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    return 'https://todo-backend-prod.up.railway.app';
+  }
+  return `http://localhost:${PORT}`;
+};
+
+console.log(`🚀 Server ready at ${getServerUrl()}/graphql`);
+console.log(`📊 Health check: ${getServerUrl()}/health`);
+console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
