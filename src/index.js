@@ -1,4 +1,4 @@
-// backend/src/index.js
+// backend/index.js - Render.com version
 import { ApolloServer } from '@apollo/server';
 import { expressMiddleware } from '@apollo/server/express4';
 import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
@@ -9,13 +9,21 @@ import bodyParser from 'body-parser';
 import { typeDefs } from './schema.js';
 import { resolvers } from './resolvers.js';
 import dotenv from 'dotenv';
-import { PrismaClient } from '@prisma/client';
 
 dotenv.config();
+console.log('Environment check:');
+console.log('  PORT:', process.env.PORT);
+console.log('  MONGODB_URI exists:', !!process.env.MONGODB_URI);
+console.log('  NODE_ENV:', process.env.NODE_ENV);
+
+if (!process.env.MONGODB_URI) {
+  console.error('❌ CRITICAL: MONGODB_URI environment variable is missing!');
+  console.error('   Create a .env file with: MONGODB_URI=mongodb+srv://...');
+  process.exit(1);
+}
 
 const app = express();
 const httpServer = http.createServer(app);
-const prisma = new PrismaClient();
 
 const server = new ApolloServer({
   typeDefs,
@@ -25,34 +33,29 @@ const server = new ApolloServer({
     console.error('GraphQL Error:', formattedError);
     return formattedError;
   },
+  introspection: true,
 });
 
 await server.start();
 
-// CORS Configuration
+// CORS configuration
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
   'https://checki-todo.vercel.app',
   'https://checki-todo-git-main.vercel.app',
   /^https:\/\/.*\.vercel\.app$/,
+  /^https:\/\/.*\.onrender\.com$/,  // Allow Render preview URLs
 ];
 
 app.get('/', (_, res) => {
-  const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN 
-    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-    : process.env.NODE_ENV === 'production'
-    ? 'https://todo-backend-prod.up.railway.app'
-    : `http://localhost:${PORT}`;
-    
   res.json({
     name: 'Todo List API',
     version: '1.0.0',
     status: 'running',
-    environment: process.env.NODE_ENV,
     endpoints: {
-      graphql: `${baseUrl}/graphql`,
-      health: `${baseUrl}/health`
+      graphql: '/graphql',
+      health: '/health'
     }
   });
 });
@@ -82,54 +85,14 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization'],
   }),
   bodyParser.json(),
-  expressMiddleware(server, {
-    context: async ({ req }) => ({ prisma, token: req.headers.authorization }),
-  })
+  expressMiddleware(server)
 );
 
-// Health check endpoint
-app.get('/health', async (_, res) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN 
-      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-      : process.env.NODE_ENV === 'production'
-      ? 'https://todo-backend-prod.up.railway.app'
-      : `http://localhost:${PORT}`;
-      
-    res.json({ 
-      status: 'ok', 
-      timestamp: new Date().toISOString(), 
-      database: 'connected',
-      environment: process.env.NODE_ENV,
-      url: `${baseUrl}/graphql`
-    });
-  } catch (error) {
-    console.error('Health check failed:', error);
-    res.status(500).json({ 
-      status: 'error', 
-      error: 'Database connection failed',
-      message: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
+app.get('/health', (_, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 const PORT = process.env.PORT || 4000;
 
 await new Promise((resolve) => httpServer.listen({ port: PORT }, resolve));
-
-// Determine the correct URL to display
-const getServerUrl = () => {
-  if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-    return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-  }
-  if (process.env.NODE_ENV === 'production') {
-    return 'https://todo-backend-prod.up.railway.app';
-  }
-  return `http://localhost:${PORT}`;
-};
-
-console.log(`🚀 Server ready at ${getServerUrl()}/graphql`);
-console.log(`📊 Health check: ${getServerUrl()}/health`);
-console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+console.log(`🚀 Server ready at ${process.env.NODE_ENV === 'production' ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'your-app.onrender.com'}` : `http://localhost:${PORT}`}/graphql`);
